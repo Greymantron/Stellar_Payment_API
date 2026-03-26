@@ -1,4 +1,4 @@
-import RecentPayments from "@/components/RecentPayments";
+import PaymentsTabs from "@/components/PaymentsTabs";
 
 export default function Home() {
   return (
@@ -42,12 +42,12 @@ export default function Home() {
 
       <section className="flex flex-col gap-4">
         <div className="flex flex-col gap-2">
-          <h2 className="text-lg font-semibold text-white">Recent Payments</h2>
+          <h2 className="text-lg font-semibold text-white">Activity</h2>
           <p className="text-sm text-slate-300">
-            An overview of your latest payment activity.
+            Review payments and webhook delivery attempts.
           </p>
         </div>
-        <RecentPayments />
+        <PaymentsTabs />
       </section>
     </main>
   );
