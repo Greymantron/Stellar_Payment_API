@@ -316,4 +316,76 @@ router.post("/verify-payment/:id", verifyPaymentRateLimit, async (req, res, next
   }
 });
 
+/**
+ * @swagger
+ * /api/webhooks/retry/{payment_id}:
+ *   post:
+ *     summary: Manually retry a webhook for a confirmed payment
+ *     tags: [Payments]
+ *     parameters:
+ *       - in: path
+ *         name: payment_id
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Payment ID
+ *     responses:
+ *       200:
+ *         description: Webhook dispatched
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 webhook:
+ *                   type: object
+ *       400:
+ *         description: Payment not confirmed or no webhook URL
+ *       404:
+ *         description: Payment not found
+ */
+router.post("/webhooks/retry/:payment_id", async (req, res, next) => {
+  try {
+    const { data, error } = await supabase
+      .from("payments")
+      .select("id, amount, asset, asset_issuer, recipient, status, tx_id, webhook_url, merchants(webhook_secret)")
+      .eq("id", req.params.payment_id)
+      .eq("merchant_id", req.merchant.id)
+      .maybeSingle();
+
+    if (error) {
+      error.status = 500;
+      throw error;
+    }
+
+    if (!data) {
+      return res.status(404).json({ error: "Payment not found" });
+    }
+
+    if (data.status !== "confirmed") {
+      return res.status(400).json({ error: "Payment is not confirmed" });
+    }
+
+    if (!data.webhook_url) {
+      return res.status(400).json({ error: "No webhook URL configured for this payment" });
+    }
+
+    const merchantSecret = data.merchants?.webhook_secret;
+
+    const webhookResult = await sendWebhook(data.webhook_url, {
+      event: "payment.confirmed",
+      payment_id: data.id,
+      amount: data.amount,
+      asset: data.asset,
+      asset_issuer: data.asset_issuer,
+      recipient: data.recipient,
+      tx_id: data.tx_id
+    }, merchantSecret);
+
+    res.json({ webhook: webhookResult });
+  } catch (err) {
+    next(err);
+  }
+});
+
 export default router;
