@@ -17,6 +17,11 @@ import { createCreatePaymentRateLimit } from "../lib/create-payment-rate-limit.j
 import { sendWebhook } from "../lib/webhooks.js";
 import { resolveBrandingConfig } from "../lib/branding.js";
 import { getPayloadForVersion } from "../webhooks/resolver.js";
+import {
+  paymentCreatedCounter,
+  paymentConfirmedCounter,
+  paymentConfirmationLatency,
+} from "../lib/metrics.js";
 
 const createPaymentRateLimit = createCreatePaymentRateLimit();
 
@@ -132,6 +137,7 @@ function createPaymentsRouter({
         const assetLimits = limits[body.asset];
         if (assetLimits) {
           if (assetLimits.min !== undefined && body.amount < assetLimits.min) {
+            paymentFailedCounter.inc({ asset: body.asset, reason: "below_min" });
             return res.status(400).json({
               error: `Amount is below the minimum for ${body.asset}`,
               min: assetLimits.min,
@@ -139,6 +145,7 @@ function createPaymentsRouter({
             });
           }
           if (assetLimits.max !== undefined && body.amount > assetLimits.max) {
+            paymentFailedCounter.inc({ asset: body.asset, reason: "above_max" });
             return res.status(400).json({
               error: `Amount exceeds the maximum for ${body.asset}`,
               max: assetLimits.max,
@@ -153,6 +160,7 @@ function createPaymentsRouter({
       const allowedIssuers = req.merchant.allowed_issuers;
       if (Array.isArray(allowedIssuers) && allowedIssuers.length > 0) {
         if (!body.asset_issuer || !allowedIssuers.includes(body.asset_issuer)) {
+          paymentFailedCounter.inc({ asset: body.asset, reason: "invalid_issuer" });
           return res.status(400).json({
             error:
               "asset_issuer is not in the merchant's list of allowed issuers",
@@ -201,6 +209,9 @@ function createPaymentsRouter({
         insertError.status = 500;
         throw insertError;
       }
+
+      // Record metric for payment creation
+      paymentCreatedCounter.inc({ asset: body.asset });
 
       res.status(201).json({
         payment_id: paymentId,
@@ -377,6 +388,15 @@ function createPaymentsRouter({
           updateError.status = 500;
           throw updateError;
         }
+
+        // Record metrics for confirmation
+        paymentConfirmedCounter.inc({ asset: data.asset });
+
+        // Calculate latency from creation to confirmation
+        const createdAt = new Date(data.created_at);
+        const now = new Date();
+        const latencySeconds = (now - createdAt) / 1000;
+        paymentConfirmationLatency.observe({ asset: data.asset }, latencySeconds);
 
         // Emit real-time event to the merchant's private room (issue #229)
         const io = req.app.locals.io;
