@@ -93,10 +93,10 @@ function StatusBadge({
   t: ReturnType<typeof useTranslations>;
 }) {
   const statusMap: Record<string, { label: string; classes: string }> = {
-    pending:   { label: t("status.pending"), classes: "bg-yellow-500/15 text-yellow-400 border border-yellow-500/30" },
+    pending: { label: t("status.pending"), classes: "bg-yellow-500/15 text-yellow-400 border border-yellow-500/30" },
     confirmed: { label: t("status.confirmed"), classes: "bg-mint/10 text-mint border border-mint/30" },
     completed: { label: t("status.completed"), classes: "bg-green-500/15 text-green-400 border border-green-500/30" },
-    failed:    { label: t("status.failed"), classes: "bg-red-500/15 text-red-400 border border-red-500/30" },
+    failed: { label: t("status.failed"), classes: "bg-red-500/15 text-red-400 border border-red-500/30" },
   };
 
   const s = statusMap[status.toLowerCase()] ?? {
@@ -242,20 +242,50 @@ export default function PaymentPage() {
     return () => controller.abort();
   }, [paymentId, t]);
 
-  // ── Poll until settled ─────────────────────────────────────────────────────
+  // ── Real-time status updates via SSE ──────────────────────────────────────
   useEffect(() => {
     if (loading || !payment) return;
     const settled = ["confirmed", "completed", "failed"].includes(payment.status);
     if (settled) return;
 
+    const eventSource = new EventSource(`${API_URL}/api/stream/${paymentId}`);
+
+    eventSource.addEventListener("payment.confirmed", (event) => {
+      try {
+        const data = JSON.parse(event.data);
+        setPayment((prev) => (prev ? { ...prev, status: data.status, tx_id: data.tx_id } : null));
+        toast.success(t("paymentConfirmed") || "Payment confirmed!");
+        eventSource.close();
+      } catch (err) {
+        console.error("Failed to parse SSE message", err);
+      }
+    });
+
+    eventSource.onerror = () => {
+      console.warn("SSE connection failed, falling back to polling.");
+      eventSource.close();
+    };
+
+    return () => eventSource.close();
+  }, [paymentId, payment, loading, t]);
+
+  // ── Polling fallback (only if not confirmed) ──────────────────────────────
+  useEffect(() => {
+    if (loading || !payment) return;
+    const settled = ["confirmed", "completed", "failed"].includes(payment.status);
+    if (settled) return;
+
+    // Use a longer interval for polling fallback (e.g., 10s)
     const id = setInterval(async () => {
       try {
         const res = await fetch(`${API_URL}/api/payment-status/${paymentId}`);
         if (!res.ok) return;
         const data = await res.json();
-        if (data.payment) setPayment(data.payment);
-      } catch { /* silent — retry next tick */ }
-    }, 5000);
+        if (data.payment && data.payment.status !== payment.status) {
+          setPayment(data.payment);
+        }
+      } catch { /* silent */ }
+    }, 10000);
 
     return () => clearInterval(id);
   }, [paymentId, payment, loading]);
@@ -357,7 +387,7 @@ export default function PaymentPage() {
   }
 
   const isSettled = payment.status === "confirmed" || payment.status === "completed";
-  const isFailed  = payment.status === "failed";
+  const isFailed = payment.status === "failed";
   const checkoutTheme = {
     ...DEFAULT_CHECKOUT_THEME,
     ...(payment.branding_config || {}),
@@ -427,55 +457,55 @@ export default function PaymentPage() {
           {/* Details */}
           <div className="flex flex-col gap-5 p-8">
 
-      {/* Recipient */}
-      <div className="flex flex-col gap-1.5">
-        <p className="text-xs font-medium uppercase tracking-wider text-slate-500">
-          {t("recipient")}
-        </p>
-        <div className="flex items-center gap-2 rounded-xl border border-white/10 bg-black/30 p-3">
-          <code className="flex-1 truncate font-mono text-sm text-slate-200">
-            {payment.recipient}
-          </code>
-          <CopyButton text={payment.recipient} />
-        </div>
-      </div>
-
-      {/* QR Code */}
-      <div className="flex flex-col gap-1.5">
-        <p className="text-xs font-medium uppercase tracking-wider text-slate-500">
-          {t("scanToPay")}
-        </p>
-        <div className="flex items-center justify-center rounded-xl border border-white/10 bg-white p-4">
-          <QRCodeSVG
-            value={payment.recipient}
-            size={160}
-            level="M"
-            bgColor="#ffffff"
-            fgColor="#000000"
-          />
-        </div>
-        <p className="text-center text-xs text-slate-500">
-          {t("scanDescription")}
-        </p>
-        <div className="sm:hidden">
-          {/* Mobile-only SEP-0007 fallback for manual wallet paste */}
-          <button
-            type="button"
-            onClick={() => setShowRawIntent((prev) => !prev)}
-            className="mx-auto mt-2 text-xs font-medium text-mint transition-colors hover:text-glow"
-          >
-            {showRawIntent ? t("hideRawIntent") : t("viewRawIntent")}
-          </button>
-          {showRawIntent && (
-            <div className="mt-3 flex items-start gap-2 rounded-lg border border-white/10 bg-black/40 p-3">
-              <code className="flex-1 break-all font-mono text-[11px] text-slate-200">
-                {buildSep7Uri(payment)}
-              </code>
-              <CopyButton text={buildSep7Uri(payment)} className="mt-0.5" />
+            {/* Recipient */}
+            <div className="flex flex-col gap-1.5">
+              <p className="text-xs font-medium uppercase tracking-wider text-slate-500">
+                {t("recipient")}
+              </p>
+              <div className="flex items-center gap-2 rounded-xl border border-white/10 bg-black/30 p-3">
+                <code className="flex-1 truncate font-mono text-sm text-slate-200">
+                  {payment.recipient}
+                </code>
+                <CopyButton text={payment.recipient} />
+              </div>
             </div>
-          )}
-        </div>
-      </div>
+
+            {/* QR Code */}
+            <div className="flex flex-col gap-1.5">
+              <p className="text-xs font-medium uppercase tracking-wider text-slate-500">
+                {t("scanToPay")}
+              </p>
+              <div className="flex items-center justify-center rounded-xl border border-white/10 bg-white p-4">
+                <QRCodeSVG
+                  value={payment.recipient}
+                  size={160}
+                  level="M"
+                  bgColor="#ffffff"
+                  fgColor="#000000"
+                />
+              </div>
+              <p className="text-center text-xs text-slate-500">
+                {t("scanDescription")}
+              </p>
+              <div className="sm:hidden">
+                {/* Mobile-only SEP-0007 fallback for manual wallet paste */}
+                <button
+                  type="button"
+                  onClick={() => setShowRawIntent((prev) => !prev)}
+                  className="mx-auto mt-2 text-xs font-medium text-mint transition-colors hover:text-glow"
+                >
+                  {showRawIntent ? t("hideRawIntent") : t("viewRawIntent")}
+                </button>
+                {showRawIntent && (
+                  <div className="mt-3 flex items-start gap-2 rounded-lg border border-white/10 bg-black/40 p-3">
+                    <code className="flex-1 break-all font-mono text-[11px] text-slate-200">
+                      {buildSep7Uri(payment)}
+                    </code>
+                    <CopyButton text={buildSep7Uri(payment)} className="mt-0.5" />
+                  </div>
+                )}
+              </div>
+            </div>
 
             {/* Date */}
             <div className="flex flex-col gap-1">
@@ -584,7 +614,7 @@ export default function PaymentPage() {
                       process.env.NEXT_PUBLIC_NETWORK_PASSPHRASE ??
                       "Test SDF Network ; September 2015"
                     }
-                    onConnected={() => {}}
+                    onConnected={() => { }}
                   />
                 )}
               </div>
