@@ -15,17 +15,16 @@ const bulkRetrySchema = z.object({
  * /api/webhooks/logs:
  *   get:
  *     summary: Get webhook delivery logs for authenticated merchant
- *     description: Retrieve paginated webhook delivery logs for the authenticated merchant account
+ *     description: Retrieve paginated webhook delivery logs for the authenticated merchant account using cursor-based pagination
  *     tags: [Webhooks]
  *     security:
  *       - ApiKeyAuth: []
  *     parameters:
  *       - in: query
- *         name: page
+ *         name: cursor
  *         schema:
- *           type: integer
- *           default: 1
- *         description: Page number (1-indexed)
+ *           type: string
+ *         description: Pagination cursor (base64 encoded)
  *       - in: query
  *         name: limit
  *         schema:
@@ -51,6 +50,11 @@ const bulkRetrySchema = z.object({
  *                   type: array
  *                   items:
  *                     type: object
+ *                 next_cursor:
+ *                   type: string
+ *                   nullable: true
+ *                 limit:
+ *                   type: integer
  *                     properties:
  *                       id:
  *                         type: string
@@ -101,6 +105,11 @@ const bulkRetrySchema = z.object({
  */
 router.get("/webhooks/logs", async (req, res, next) => {
   try {
+    const { cursor, limit, status } = req.query;
+    const result = await merchantService.getWebhookLogs(req.merchant.id, {
+      cursor,
+      limit,
+      status,
     const merchantId = req.merchant.id;
     
     // Parse pagination params
@@ -164,6 +173,8 @@ router.get("/webhooks/logs", async (req, res, next) => {
       },
       ...generatePaginationLinks(req, page, limit, Math.ceil((count || 0) / limit)),
     });
+
+    res.json(result);
   } catch (err) {
     next(err);
   }
@@ -199,28 +210,13 @@ router.post("/webhooks/test", requireApiKeyAuth(), async (req, res, next) => {
 
 router.get("/webhook-logs", async (req, res, next) => {
   try {
-    const { rows } = await req.app.locals.pool.query(
-      `
-        select
-          l.id,
-          l.payment_id,
-          l.status_code,
-          l.timestamp as created_at,
-          p.webhook_url as url
-        from webhook_delivery_logs l
-        join payments p on p.id = l.payment_id
-        where p.merchant_id = $1
-        order by l.timestamp desc
-      `,
-      [req.merchant.id],
-    );
-
-    res.json({
-      logs: rows.map((row) => ({
-        ...row,
-        event: "payment.confirmed",
-      })),
+    const { cursor, limit, status } = req.query;
+    const result = await merchantService.getWebhookLogs(req.merchant.id, {
+      cursor,
+      limit,
+      status,
     });
+    res.json(result);
   } catch (err) {
     next(err);
   }
