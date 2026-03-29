@@ -1,7 +1,7 @@
 "use client";
 
-import React, { useEffect, useRef, useState, useCallback } from "react";
-import { useTranslations, useLocale } from "next-intl";
+import React, { useEffect, useState } from "react";
+import { useLocale } from "next-intl";
 import { motion, AnimatePresence } from "framer-motion";
 import { useMerchantApiKey } from "@/lib/merchant-store";
 import { localeToLanguageTag } from "@/i18n/config";
@@ -24,7 +24,7 @@ interface PaymentDetails {
 interface WebhookLog {
   id: string;
   event_type: string;
-  payload: any;
+  payload: unknown;
   status: number;
   response_body: string | null;
   url: string;
@@ -44,7 +44,6 @@ export default function PaymentDetailsSheet({
   isOpen,
   onClose,
 }: PaymentDetailsSheetProps) {
-  const t = useTranslations("recentPayments");
   const locale = localeToLanguageTag(useLocale());
   const apiKey = useMerchantApiKey();
   const [payment, setPayment] = useState<PaymentDetails | null>(null);
@@ -69,18 +68,15 @@ export default function PaymentDetailsSheet({
         setPayment(paymentData.payment);
 
         // Fetch webhook logs (simplified mock or actual fetch if available)
-        // For now, let's assume there's a way to filter logs by payment ID if the API supports it.
-        // If not, we'll just show that it's a feature.
         const logsRes = await fetch(`${API_URL}/api/webhook-logs?limit=10`, {
           headers: { "x-api-key": apiKey },
         });
         if (logsRes.ok) {
           const logsData = await logsRes.json();
-          // Filter logs for this payment if possible, else show recent logs
           setWebhookLogs(logsData.logs || []);
         }
-      } catch (err: any) {
-        setError(err.message);
+      } catch (err: unknown) {
+        setError(err instanceof Error ? err.message : "An error occurred");
       } finally {
         setLoading(false);
       }
@@ -234,7 +230,7 @@ export default function PaymentDetailsSheet({
                           <p className="text-sm text-slate-500 italic">No webhook attempts found for this transaction.</p>
                         ) : (
                           <div className="divide-y divide-white/5">
-                            {webhookLogs.map((log) => (
+                            {webhookLogs.map((log: WebhookLog) => (
                               <div key={log.id} className="py-3">
                                 <div className="flex items-center justify-between">
                                   <span className="text-xs font-mono text-white">{log.event_type}</span>
